@@ -1,17 +1,13 @@
-const express = require('express');
-const router = express.Router();
+const express        = require('express');
+const router         = express.Router();
+const AuthController = require('../controllers/auth.controller');
+const { authenticate }     = require('../middleware/auth');
+const { validate, schemas } = require('../middleware/validate');
 
-// Stubs — full implementation in Phase 2
-router.post('/register', (req, res) => {
-  res.json({ success: true, message: 'Register stub — Phase 2' });
-});
-
-router.post('/login', (req, res) => {
-  res.json({ success: true, message: 'Login stub — Phase 2' });
-});
-
-router.post('/refresh', (req, res) => {
-  res.json({ success: true, message: 'Refresh stub — Phase 2' });
-});
+router.post('/register', validate(schemas.register), AuthController.register);
+router.post('/login',    validate(schemas.login),    AuthController.login);
+router.post('/refresh',                              AuthController.refresh);
+router.post('/logout',   authenticate,               AuthController.logout);
+router.get('/me',        authenticate,               AuthController.me);
 
 module.exports = router;

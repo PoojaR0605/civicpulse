@@ -1,18 +1,11 @@
-const express = require('express');
-const router = express.Router();
+const express          = require('express');
+const router           = express.Router();
+const WardsController  = require('../controllers/wards.controller');
+const { authenticate } = require('../middleware/auth');
 
-router.get('/', (req, res) => {
-  res.json({ success: true, data: [], message: 'Wards list — Phase 1 schema' });
-});
-
-router.get('/locate', (req, res) => {
-  // Usage: GET /wards/locate?lat=12.97&lng=77.59
-  const { lat, lng } = req.query;
-  res.json({
-    success: true,
-    message: 'Ward locator — after PostGIS setup',
-    received: { lat, lng },
-  });
-});
+router.get('/',           authenticate, WardsController.getAll);
+router.get('/locate',     authenticate, WardsController.locate);
+router.get('/:id',        authenticate, WardsController.getById);
+router.get('/:id/stats',  authenticate, WardsController.getStats);
 
 module.exports = router;

@@ -1,20 +1,28 @@
-const express = require('express');
-const router = express.Router();
+const express           = require('express');
+const router            = express.Router();
+const IssuesController  = require('../controllers/issues.controller');
+const { authenticate, authorize } = require('../middleware/auth');
+const { validate, schemas }       = require('../middleware/validate');
+const upload                      = require('../middleware/upload');
 
-router.get('/', (req, res) => {
-  res.json({ success: true, data: [], message: 'Issues list — Phase 2' });
-});
+router.get('/',     authenticate, IssuesController.getAll);
+router.get('/mine', authenticate, IssuesController.getMyIssues);
+router.get('/:id',  authenticate, IssuesController.getById);
 
-router.post('/', (req, res) => {
-  res.json({ success: true, message: 'Submit issue — Phase 2' });
-});
+router.post('/',
+  authenticate,
+  upload.single('photo'),
+  validate(schemas.submitIssue),
+  IssuesController.submit
+);
 
-router.get('/:id', (req, res) => {
-  res.json({ success: true, data: null, message: 'Issue detail — Phase 2' });
-});
+router.patch('/:id/status',
+  authenticate,
+  authorize('officer', 'admin'),
+  validate(schemas.updateStatus),
+  IssuesController.updateStatus
+);
 
-router.patch('/:id/status', (req, res) => {
-  res.json({ success: true, message: 'Update status — Phase 2' });
-});
+router.post('/:id/vote', authenticate, IssuesController.vote);
 
 module.exports = router;
