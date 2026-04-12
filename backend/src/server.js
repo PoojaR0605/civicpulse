@@ -1,9 +1,11 @@
 require('dotenv').config();
-const http            = require('http');
-const app             = require('./app');
-const { connectDB }   = require('./config/db');
-const { connectRedis} = require('./config/redis');
-const { logger }      = require('./utils/logger');
+const http              = require('http');
+const app               = require('./app');
+const { connectDB }     = require('./config/db');
+const { connectRedis }  = require('./config/redis');
+const { logger }        = require('./utils/logger');
+const SocketService     = require('./services/socket.service');
+const { startEscalationJob } = require('./jobs/escalation.job');
 
 const PORT = process.env.PORT || 3000;
 
@@ -14,9 +16,12 @@ const start = async () => {
 
     const server = http.createServer(app);
 
-    // Socket.io plugs in here — Phase 4
-    // const io = require('socket.io')(server, { cors: { origin: '*' } });
-    // app.set('io', io);
+    // Initialize Socket.io
+    const io = SocketService.init(server);
+    app.set('io', io);
+
+    // Start escalation cron
+    startEscalationJob(io);
 
     server.listen(PORT, () => {
       logger.info(`Server running → http://localhost:${PORT}`);
