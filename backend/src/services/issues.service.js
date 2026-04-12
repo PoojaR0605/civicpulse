@@ -1,6 +1,7 @@
 const IssueModel = require('../models/issue.model');
 const WardModel  = require('../models/ward.model');
 const { pool }   = require('../config/db');
+const { logger } = require('../utils/logger');
 
 const uploadPhoto = async (file) => {
   if (!file) return { url: null, path: null };
@@ -48,14 +49,29 @@ const getSlaDeadline = async (category) => {
 const IssuesService = {
   async submit({ reportedBy, latitude, longitude, gpsAccuracy,
                  category, title, description, address, file }) {
+    // 1. Route to ward
     const ward = await WardModel.findByCoordinates(latitude, longitude);
 
+    // 2. Upload photo stub
     const { url: photoUrl, path: photoPath } = await uploadPhoto(file);
 
+    // 3. Geohash
     const geohash = encodeGeohash(latitude, longitude, 7);
 
+    // 4. Check Redis dedup
+    const DedupService = require('./dedup.service');
+    const duplicate = await DedupService.isDuplicate(geohash, category);
+    if (duplicate) {
+      logger.info(`Duplicate detected — original issue ${duplicate.issueId}`);
+      await DedupService.handleDuplicate(duplicate.issueId, reportedBy);
+      const original = await IssueModel.findById(duplicate.issueId);
+      return { issue: original, ward: ward || null, isDuplicate: true };
+    }
+
+    // 5. SLA deadline
     const { deadline: slaDeadline, basePriority } = await getSlaDeadline(category);
 
+    // 6. Create issue
     const issue = await IssueModel.create({
       reportedBy, latitude, longitude, gpsAccuracy,
       address, wardId: ward?.id || null,
@@ -64,13 +80,32 @@ const IssuesService = {
       slaDeadline, basePriority,
     });
 
+    // 7. Log initial status
     await pool.query(
       `INSERT INTO issue_status_history (issue_id, changed_by, to_status, note)
        VALUES ($1, $2, 'submitted', 'Issue submitted by citizen')`,
       [issue.id, reportedBy]
     );
 
-    return { issue, ward: ward || null };
+    // 8. Register in Redis dedup
+    await DedupService.register(geohash, category, issue.id);
+
+    // 9. Trigger AI validation async — never blocks response
+    if (file) {
+      const ValidatorService = require('./ai/validator.service');
+      setImmediate(() => {
+        ValidatorService.validateIssue({
+          issueId:     issue.id,
+          imageBuffer: file.buffer,
+          imageName:   file.originalname,
+          category,
+          lat:         latitude,
+          lng:         longitude,
+        }).catch(err => logger.error('Background AI validation error:', err.message));
+      });
+    }
+
+    return { issue, ward: ward || null, isDuplicate: false };
   },
 
   async getAll(filters) {
@@ -111,7 +146,6 @@ const IssuesService = {
       err.statusCode = 409;
       throw err;
     }
-
     await pool.query(
       `INSERT INTO votes (issue_id, user_id) VALUES ($1, $2)`,
       [issueId, userId]
