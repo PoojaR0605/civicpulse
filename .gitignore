@@ -8,3 +8,6 @@ Thumbs.db
 **/build/
 mobile/.dart_tool/
 mobile/build/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
