@@ -51,10 +51,17 @@ const getSlaDeadline = async (category) => {
 const IssuesService = {
   async submit({ reportedBy, latitude, longitude, gpsAccuracy,
                  category, title, description, address, file }) {
+
+    // 1. Route to ward via PostGIS
     const ward = await WardModel.findByCoordinates(latitude, longitude);
+
+    // 2. Upload photo (stub — Phase 6 wires real Firebase)
     const { url: photoUrl, path: photoPath } = await uploadPhoto(file);
+
+    // 3. Generate geohash for dedup
     const geohash = encodeGeohash(latitude, longitude, 7);
 
+    // 4. Check Redis duplicate
     const DedupService = require('./dedup.service');
     const duplicate = await DedupService.isDuplicate(geohash, category);
     if (duplicate) {
@@ -64,8 +71,10 @@ const IssuesService = {
       return { issue: original, ward: ward || null, isDuplicate: true };
     }
 
+    // 5. Get SLA deadline from config
     const { deadline: slaDeadline, basePriority } = await getSlaDeadline(category);
 
+    // 6. Create issue in DB
     const issue = await IssueModel.create({
       reportedBy, latitude, longitude, gpsAccuracy,
       address, wardId: ward?.id || null,
@@ -74,21 +83,23 @@ const IssuesService = {
       slaDeadline, basePriority,
     });
 
+    // 7. Log initial status to audit trail
     await pool.query(
       `INSERT INTO issue_status_history (issue_id, changed_by, to_status, note)
        VALUES ($1, $2, 'submitted', 'Issue submitted by citizen')`,
       [issue.id, reportedBy]
     );
 
+    // 8. Register in Redis dedup cache (72h TTL)
     await DedupService.register(geohash, category, issue.id);
 
-    // Calculate initial priority score
+    // 9. Calculate initial priority score
     await PriorityService.calculateScore(issue.id);
 
-    // Emit new issue to ward room
+    // 10. Emit new issue to ward room via Socket.io
     try { SocketService.emitNewIssue(issue, ward); } catch (_) {}
 
-    // Async AI validation
+    // 11. Trigger AI validation async — never blocks response
     if (file) {
       const ValidatorService = require('./ai/validator.service');
       setImmediate(() => {
@@ -131,10 +142,17 @@ const IssuesService = {
       err.statusCode = 404;
       throw err;
     }
+
     const updated = await IssueModel.updateStatus(id, status, changedBy, note);
 
-    // Emit real-time status change
+    // Emit real-time status change via Socket.io
     try { SocketService.emitStatusChange(updated); } catch (_) {}
+
+    // Send push notification to citizen
+    try {
+      const NotificationService = require('./notification.service');
+      await NotificationService.notifyStatusChange(updated, status);
+    } catch (_) {}
 
     return updated;
   },
@@ -149,10 +167,12 @@ const IssuesService = {
       err.statusCode = 409;
       throw err;
     }
+
     await pool.query(
       `INSERT INTO votes (issue_id, user_id) VALUES ($1, $2)`,
       [issueId, userId]
     );
+
     const result = await IssueModel.incrementVote(issueId);
 
     // Recalculate priority after vote

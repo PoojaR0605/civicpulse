@@ -1,0 +1,40 @@
+name: civicpulse_app
+description: CivicPulse - Smart Civic Issue Reporting
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # HTTP
+  dio: ^5.4.3
+  
+  # State management
+  flutter_riverpod: ^2.5.1
+  
+  # Storage
+  shared_preferences: ^2.2.3
+  
+  # Navigation
+  go_router: ^13.2.0
+  
+  # UI
+  cupertino_icons: ^1.0.6
+  
+  # Image picker
+  image_picker: ^1.1.2
+  
+  # Location (web compatible)
+  geolocator: ^11.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
