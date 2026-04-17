@@ -18,8 +18,9 @@ export default function LoginPage({ onLogin }) {
         localStorage.setItem('user',  JSON.stringify(res.data.data.user));
         onLogin(res.data.data.user);
       }
-    } catch {
-      setError('Invalid email or password');
+    } catch (err) {
+      console.error('Login error:', err.response?.data || err.message);
+      setError(err.response?.data?.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }
