@@ -32,7 +32,7 @@ export default function DashboardPage({ user, onLogout }) {
   useEffect(() => {
     const token = localStorage.getItem('token');
     connectSocket(token);
-    joinWard('d3124828-e11e-48c0-b8b1-24e3f3bd2324');
+    joinWard(user?.ward_id || 'general');   // ✅ Fixed — uses officer's actual ward
     onNewIssue((data) => {
       setAlerts(prev => [`New issue: ${data.category} in ${data.ward}`, ...prev.slice(0, 4)]);
       fetchIssues();
