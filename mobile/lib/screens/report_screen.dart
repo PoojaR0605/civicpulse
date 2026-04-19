@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:dio/dio.dart';
 import 'dart:typed_data';
 import '../services/api_service.dart';
@@ -8,8 +9,13 @@ import '../providers/issues_provider.dart';
 
 class ReportScreen extends ConsumerStatefulWidget {
   final VoidCallback onSubmitted;
+  final VoidCallback onBack;
 
-  const ReportScreen({super.key, required this.onSubmitted});
+  const ReportScreen({
+    super.key,
+    required this.onSubmitted,
+    required this.onBack,
+  });
 
   @override
   ConsumerState<ReportScreen> createState() => _ReportScreenState();
@@ -18,23 +24,80 @@ class ReportScreen extends ConsumerStatefulWidget {
 class _ReportScreenState extends ConsumerState<ReportScreen> {
   final _titleCtrl = TextEditingController();
   final _descCtrl  = TextEditingController();
-  String _category = 'pothole';
+  String _category  = 'pothole';
   Uint8List? _imageBytes;
-  String?   _imageName;
-  bool _submitting = false;
+  String?    _imageName;
+  bool _submitting  = false;
   String? _error;
 
+  // GPS
+  double? _lat;
+  double? _lng;
+  double? _accuracy;
+  String  _locationStatus = 'Tap to get GPS location';
+  bool    _gettingLocation = false;
+
   static const _categories = [
-    ('pothole',      'Pothole'),
-    ('garbage',      'Garbage'),
-    ('streetlight',  'Streetlight'),
-    ('sewage',       'Sewage'),
-    ('encroachment', 'Encroachment'),
-    ('waterlogging', 'Waterlogging'),
-    ('other',        'Other'),
+    ('pothole',      'Pothole',      Icons.warning_rounded),
+    ('garbage',      'Garbage',      Icons.delete_outline),
+    ('streetlight',  'Streetlight',  Icons.lightbulb_outline),
+    ('sewage',       'Sewage',       Icons.water_damage_outlined),
+    ('encroachment', 'Encroachment', Icons.block_outlined),
+    ('waterlogging', 'Waterlogging', Icons.water_outlined),
+    ('other',        'Other',        Icons.report_outlined),
   ];
 
-  // LIVE CAMERA ONLY — no gallery
+  // GET GPS LOCATION
+  Future<void> _getLocation() async {
+    setState(() {
+      _gettingLocation = true;
+      _locationStatus  = 'Acquiring GPS...';
+    });
+
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _locationStatus  = 'Location services disabled';
+          _gettingLocation = false;
+        });
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _locationStatus  = 'Location permission denied';
+            _gettingLocation = false;
+          });
+          return;
+        }
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _lat             = position.latitude;
+        _lng             = position.longitude;
+        _accuracy        = position.accuracy;
+        _locationStatus  = 'Location captured (±${position.accuracy.toStringAsFixed(0)}m)';
+        _gettingLocation = false;
+      });
+    } catch (e) {
+      setState(() {
+        _locationStatus  = 'Location error — using default';
+        _lat             = 12.975;
+        _lng             = 77.575;
+        _gettingLocation = false;
+      });
+    }
+  }
+
+  // LIVE CAMERA ONLY
   Future<void> _capturePhoto() async {
     final picker = ImagePicker();
     try {
@@ -55,7 +118,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Camera error: ${e.toString()}'),
+            content: Text('Camera error: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -65,7 +128,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
 
   bool get _canSubmit =>
       _imageBytes != null &&
-      _category.isNotEmpty &&
+      _lat != null &&
       !_submitting;
 
   Future<void> _submit() async {
@@ -74,9 +137,9 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
 
     try {
       final formData = FormData.fromMap({
-        'latitude':    '12.975',
-        'longitude':   '77.575',
-        'gpsAccuracy': '15.0',
+        'latitude':    _lat.toString(),
+        'longitude':   _lng.toString(),
+        'gpsAccuracy': _accuracy?.toString() ?? '15.0',
         'category':    _category,
         'title':       _titleCtrl.text.trim().isEmpty
                          ? _category
@@ -119,12 +182,15 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
+      backgroundColor: const Color(0xFFF0F4FF),
       appBar: AppBar(
         title: const Text('Report Issue'),
-        backgroundColor: const Color(0xFF1976D2),
+        backgroundColor: const Color(0xFF1565C0),
         foregroundColor: Colors.white,
-        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: widget.onBack,
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -132,238 +198,300 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
 
-            // LIVE CAMERA SECTION
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: _imageBytes != null
-                      ? const Color(0xFF1976D2)
-                      : Colors.grey.shade300,
-                  width: _imageBytes != null ? 2 : 1,
-                ),
-              ),
-              child: _imageBytes != null
-                  ? Column(
-                      children: [
-                        ClipRRect(
-                          borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(12)),
-                          child: Image.memory(
-                            _imageBytes!,
-                            width: double.infinity,
-                            height: 240,
-                            fit: BoxFit.cover,
-                          ),
+            // STEP 1 — GPS LOCATION
+            _SectionCard(
+              step: '1',
+              title: 'Your Location',
+              child: Column(
+                children: [
+                  GestureDetector(
+                    onTap: _gettingLocation ? null : _getLocation,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: _lat != null
+                            ? Colors.green.shade50
+                            : Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _lat != null
+                              ? Colors.green.shade300
+                              : Colors.blue.shade200,
                         ),
-                        Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.check_circle,
-                                  color: Colors.green, size: 16),
-                              const SizedBox(width: 6),
-                              const Text('Live photo captured',
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _lat != null
+                                ? Icons.gps_fixed
+                                : Icons.gps_not_fixed,
+                            color: _lat != null
+                                ? Colors.green
+                                : const Color(0xFF1565C0),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _locationStatus,
                                   style: TextStyle(
-                                      color: Colors.green,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500)),
-                              const SizedBox(width: 16),
-                              TextButton.icon(
-                                onPressed: _capturePhoto,
-                                icon: const Icon(Icons.refresh, size: 16),
-                                label: const Text('Retake',
-                                    style: TextStyle(fontSize: 13)),
-                                style: TextButton.styleFrom(
-                                    foregroundColor: const Color(0xFF1976D2)),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    )
-                  : InkWell(
-                      onTap: _capturePhoto,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 40),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              width: 72,
-                              height: 72,
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF1976D2).withOpacity(0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.camera_alt,
-                                size: 36,
-                                color: Color(0xFF1976D2),
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            const Text(
-                              'Take Live Photo',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Color(0xFF1976D2),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Camera opens directly — gallery not allowed',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey.shade500,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Container(
-                              margin: const EdgeInsets.only(top: 8),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                    color: Colors.orange.shade200),
-                              ),
-                              child: Text(
-                                'Required',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.orange.shade700,
-                                  fontWeight: FontWeight.w500,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 14,
+                                    color: _lat != null
+                                        ? Colors.green.shade700
+                                        : const Color(0xFF1565C0),
+                                  ),
                                 ),
-                              ),
+                                if (_lat != null)
+                                  Text(
+                                    '${_lat!.toStringAsFixed(6)}, ${_lng!.toStringAsFixed(6)}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade500,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                              ],
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // CATEGORY
-            const Text('Category',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                    color: Colors.black87)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _categories.map((cat) {
-                final (id, label) = cat;
-                final selected = _category == id;
-                return GestureDetector(
-                  onTap: () => setState(() => _category = id),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFF1976D2)
-                          : Colors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFF1976D2)
-                            : Colors.grey.shade300,
-                      ),
-                    ),
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                        color: selected ? Colors.white : Colors.black87,
+                          ),
+                          if (_gettingLocation)
+                            const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            )
+                          else if (_lat == null)
+                            const Icon(Icons.chevron_right,
+                                color: Colors.grey),
+                        ],
                       ),
                     ),
                   ),
-                );
-              }).toList(),
+                  if (_lat == null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Tap above to capture your exact GPS location',
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade500),
+                    ),
+                  ],
+                ],
+              ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 12),
 
-            // TITLE
-            const Text('Title',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                    color: Colors.black87)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _titleCtrl,
-              decoration: InputDecoration(
-                hintText: 'Brief description of the issue',
-                hintStyle: TextStyle(color: Colors.grey.shade400),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF1976D2)),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 12),
+            // STEP 2 — LIVE PHOTO
+            _SectionCard(
+              step: '2',
+              title: 'Live Photo Evidence',
+              child: Column(
+                children: [
+                  GestureDetector(
+                    onTap: _capturePhoto,
+                    child: Container(
+                      width: double.infinity,
+                      height: _imageBytes != null ? null : 180,
+                      decoration: BoxDecoration(
+                        color: _imageBytes != null
+                            ? null
+                            : Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _imageBytes != null
+                              ? const Color(0xFF1565C0)
+                              : Colors.grey.shade300,
+                          width: _imageBytes != null ? 2 : 1,
+                        ),
+                      ),
+                      child: _imageBytes != null
+                          ? Column(
+                              children: [
+                                ClipRRect(
+                                  borderRadius:
+                                      const BorderRadius.vertical(
+                                          top: Radius.circular(8)),
+                                  child: Image.memory(
+                                    _imageBytes!,
+                                    width: double.infinity,
+                                    height: 200,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 10),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.check_circle,
+                                          color: Colors.green, size: 16),
+                                      const SizedBox(width: 6),
+                                      const Text('Live photo captured',
+                                          style: TextStyle(
+                                              color: Colors.green,
+                                              fontSize: 13,
+                                              fontWeight:
+                                                  FontWeight.w500)),
+                                      const SizedBox(width: 16),
+                                      TextButton.icon(
+                                        onPressed: _capturePhoto,
+                                        icon: const Icon(Icons.refresh,
+                                            size: 14),
+                                        label: const Text('Retake',
+                                            style:
+                                                TextStyle(fontSize: 12)),
+                                        style: TextButton.styleFrom(
+                                          foregroundColor:
+                                              const Color(0xFF1565C0),
+                                          padding: EdgeInsets.zero,
+                                          minimumSize: Size.zero,
+                                          tapTargetSize: MaterialTapTargetSize
+                                              .shrinkWrap,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Column(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: 64,
+                                  height: 64,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1565C0)
+                                        .withOpacity(0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.camera_alt,
+                                      size: 32,
+                                      color: Color(0xFF1565C0)),
+                                ),
+                                const SizedBox(height: 10),
+                                const Text(
+                                  'Take Live Photo',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF1565C0),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Camera opens directly\nGallery uploads not permitted',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade500),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // STEP 3 — CATEGORY
+            _SectionCard(
+              step: '3',
+              title: 'Issue Category',
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _categories.map((cat) {
+                  final (id, label, icon) = cat;
+                  final selected = _category == id;
+                  return GestureDetector(
+                    onTap: () => setState(() => _category = id),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? const Color(0xFF1565C0)
+                            : Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: selected
+                              ? const Color(0xFF1565C0)
+                              : Colors.grey.shade300,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(icon,
+                              size: 14,
+                              color: selected
+                                  ? Colors.white
+                                  : Colors.grey.shade600),
+                          const SizedBox(width: 6),
+                          Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                              color: selected
+                                  ? Colors.white
+                                  : Colors.black87,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // STEP 4 — DETAILS
+            _SectionCard(
+              step: '4',
+              title: 'Issue Details',
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _titleCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Title (optional)',
+                      hintText: 'e.g. Large pothole near bus stop',
+                      prefixIcon: Icon(Icons.title),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _descCtrl,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Description (optional)',
+                      hintText: 'Additional details...',
+                      prefixIcon: Icon(Icons.description_outlined),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ],
               ),
             ),
 
             const SizedBox(height: 16),
-
-            // DESCRIPTION
-            const Text('Description',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                    color: Colors.black87)),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _descCtrl,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: 'Additional details about the issue...',
-                hintStyle: TextStyle(color: Colors.grey.shade400),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF1976D2)),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 12),
-              ),
-            ),
-
-            const SizedBox(height: 24),
 
             // ERROR
             if (_error != null)
@@ -381,7 +509,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                         color: Colors.red.shade700, fontSize: 13)),
               ),
 
-            // BLOCKED SUBMIT MESSAGE
+            // BLOCKED MESSAGE
             if (!_canSubmit && !_submitting)
               Container(
                 width: double.infinity,
@@ -398,9 +526,11 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                         color: Colors.amber.shade700, size: 16),
                     const SizedBox(width: 8),
                     Text(
-                      _imageBytes == null
-                          ? 'Take a live photo to continue'
-                          : 'Select a category to continue',
+                      _lat == null && _imageBytes == null
+                          ? 'Get GPS location and take a photo to continue'
+                          : _lat == null
+                              ? 'Get your GPS location first'
+                              : 'Take a live photo to continue',
                       style: TextStyle(
                           color: Colors.amber.shade700, fontSize: 13),
                     ),
@@ -408,14 +538,14 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                 ),
               ),
 
-            // SUBMIT BUTTON
+            // SUBMIT
             SizedBox(
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
                 onPressed: _canSubmit ? _submit : null,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1976D2),
+                  backgroundColor: const Color(0xFF1565C0),
                   foregroundColor: Colors.white,
                   disabledBackgroundColor: Colors.grey.shade300,
                   shape: RoundedRectangleBorder(
@@ -443,6 +573,75 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
             const SizedBox(height: 32),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  final String step;
+  final String title;
+  final Widget child;
+
+  const _SectionCard({
+    required this.step,
+    required this.title,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1565C0),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    step,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
       ),
     );
   }
