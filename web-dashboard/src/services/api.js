@@ -10,19 +10,25 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-export const login = (email, password) =>
-  api.post('/auth/login', { email, password });
+api.interceptors.response.use(
+  res => res,
+  err => {
+    if (err.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/';
+    }
+    return Promise.reject(err);
+  }
+);
 
-export const getIssues = (params) =>
-  api.get('/issues', { params });
-
-export const updateStatus = (id, status, note) =>
-  api.patch(`/issues/${id}/status`, { status, note });
-
-export const getWards = () =>
-  api.get('/wards');
-
-export const getWardStats = (wardId) =>
-  api.get(`/wards/${wardId}/stats`);
+export const login        = (email, password) => api.post('/auth/login', { email, password });
+export const register     = (data)            => api.post('/auth/register', data);
+export const getIssues    = (params)          => api.get('/issues', { params });
+export const getMyIssues  = ()                => api.get('/issues/mine');
+export const updateStatus = (id, status, note)=> api.patch(`/issues/${id}/status`, { status, note });
+export const submitIssue  = (formData)        => api.post('/issues', formData, { headers:{ 'Content-Type':'multipart/form-data' } });
+export const getWards     = ()                => api.get('/wards');
+export const getWardStats = (wardId)          => api.get(`/wards/${wardId}/stats`);
 
 export default api;
