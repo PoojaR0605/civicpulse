@@ -15,14 +15,14 @@ const validate = (schema) => (req, res, next) => {
 // Schemas
 const schemas = {
   register: Joi.object({
-    name:       Joi.string().min(2).max(100).required(),
-    email:      Joi.string().email().required(),
-    phone:      Joi.string().pattern(/^[6-9]\d{9}$/).optional()
-                   .messages({ 'string.pattern.base': 'Enter a valid 10-digit Indian mobile number' }),
-    password:   Joi.string().min(6).required(),
-    role:       Joi.string().valid('citizen', 'officer').default('citizen'),
-    department: Joi.string().max(100).optional(),
-  }),
+  name:       Joi.string().min(2).max(100).required(),
+  email:      Joi.string().email().required(),
+  phone:      Joi.string().pattern(/^[6-9]\d{9}$/).optional().allow('', null)
+                 .messages({ 'string.pattern.base': 'Enter a valid 10-digit Indian mobile number' }),
+  password:   Joi.string().min(6).required(),
+  role:       Joi.string().valid('citizen', 'officer').default('citizen'),
+  department: Joi.string().max(100).optional().allow('', null),
+}),
 
   login: Joi.object({
     email:    Joi.string().email().required(),

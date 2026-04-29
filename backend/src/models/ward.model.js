@@ -1,58 +1,44 @@
+const express = require('express');
+const router = express.Router();
+
 const { pool } = require('../config/db');
+const { authenticate, authorize } = require('../middleware/auth');
 
-const WardModel = {
-  async findAll(city = 'Bengaluru') {
-    const { rows } = await pool.query(
-      `SELECT id, ward_number, ward_name, city, zone,
-              area_sqkm, population, risk_score
-       FROM wards
-       WHERE city = $1
-       ORDER BY ward_number ASC`,
-      [city]
-    );
-    return rows;
-  },
+// GET /api/wards/analytics
+router.get(
+  '/analytics',
+  authenticate,
+  authorize('officer', 'admin'),
+  async (req, res, next) => {
+    try {
+      const { rows } = await pool.query(`
+        SELECT
+          COUNT(*)                                            AS total,
+          COUNT(*) FILTER (WHERE status='resolved')          AS resolved,
+          COUNT(*) FILTER (WHERE status='in_progress')       AS in_progress,
+          COUNT(*) FILTER (WHERE status='submitted')         AS pending,
+          COUNT(*) FILTER (WHERE sla_breached=TRUE)          AS overdue,
+          COUNT(*) FILTER (WHERE status='rejected')          AS rejected,
+          AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))/3600)
+            FILTER (WHERE resolved_at IS NOT NULL)           AS avg_resolution_hours,
+          category,
+          w.ward_name
+        FROM issues i
+        LEFT JOIN wards w ON w.id = i.ward_id
+        WHERE i.is_duplicate = FALSE
+        GROUP BY category, w.ward_name
+        ORDER BY total DESC
+      `);
 
-  async findById(id) {
-    const { rows } = await pool.query(
-      `SELECT id, ward_number, ward_name, city, zone,
-              area_sqkm, population, risk_score
-       FROM wards WHERE id = $1 LIMIT 1`,
-      [id]
-    );
-    return rows[0] || null;
-  },
+      res.status(200).json({
+        success: true,
+        count: rows.length,
+        data: rows,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
-  // THE KEY QUERY — point-in-polygon using PostGIS
-  async findByCoordinates(lat, lng) {
-    const { rows } = await pool.query(
-      `SELECT id, ward_number, ward_name, city, zone, risk_score
-       FROM wards
-       WHERE ST_Contains(
-         boundary,
-         ST_SetSRID(ST_Point($2, $1), 4326)
-       )
-       LIMIT 1`,
-      [lat, lng]
-    );
-    return rows[0] || null;
-  },
-
-  async getStats(wardId) {
-    const { rows } = await pool.query(
-      `SELECT
-         COUNT(*)                                          AS total_issues,
-         COUNT(*) FILTER (WHERE status = 'resolved')      AS resolved,
-         COUNT(*) FILTER (WHERE status = 'in_progress')   AS in_progress,
-         COUNT(*) FILTER (WHERE status = 'submitted')     AS pending,
-         COUNT(*) FILTER (WHERE sla_breached = TRUE)      AS sla_breached,
-         ROUND(AVG(priority_score)::NUMERIC, 2)           AS avg_priority
-       FROM issues
-       WHERE ward_id = $1`,
-      [wardId]
-    );
-    return rows[0];
-  },
-};
-
-module.exports = WardModel;
+module.exports = router;

@@ -21,9 +21,45 @@ class CivicPulseApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1976D2),
+          seedColor: const Color(0xFF1565C0),
+          brightness: Brightness.light,
         ),
         useMaterial3: true,
+        fontFamily: 'Roboto',
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF1565C0),
+          foregroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: true,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF1565C0),
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.grey.shade50,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade300),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Color(0xFF1565C0), width: 2),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16, vertical: 14),
+        ),
       ),
       home: const AppNavigator(),
     );
@@ -47,26 +83,27 @@ class _AppNavigatorState extends State<AppNavigator> {
     switch (_screen) {
       case 'login':
         return LoginScreen(
-          onLogin:    () => _go('home'),
+          onLogin: () => _go('home'),
           onRegister: () => _go('register'),
         );
       case 'register':
         return RegisterScreen(
           onRegister: () => _go('home'),
-          onLogin:    () => _go('login'),
+          onLogin: () => _go('login'),
         );
       case 'home':
         return HomeScreen(
-          onReport:  () => _go('report'),
-          onLogout:  () => _go('login'),
+          onReport: () => _go('report'),
+          onLogout: () => _go('login'),
         );
       case 'report':
         return ReportScreen(
           onSubmitted: () => _go('home'),
+          onBack: () => _go('home'),
         );
       default:
         return LoginScreen(
-          onLogin:    () => _go('home'),
+          onLogin: () => _go('home'),
           onRegister: () => _go('register'),
         );
     }

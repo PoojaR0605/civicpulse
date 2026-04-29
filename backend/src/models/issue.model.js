@@ -2,46 +2,37 @@ const { pool } = require('../config/db');
 
 const IssueModel = {
   async create({
-  reportedBy, latitude, longitude, gpsAccuracy,
-  address, wardId, category, title, description,
-  photoUrl, photoPath, geohash, slaDeadline, basePriority,
-}) {
-  const lat = parseFloat(latitude);
-  const lng = parseFloat(longitude);
+    reportedBy, latitude, longitude, gpsAccuracy,
+    address, wardId, category, title, description,
+    photoUrl, photoPath, geohash, slaDeadline, basePriority,
+  }) {
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
 
-  const { rows } = await pool.query(
-    `INSERT INTO issues (
-       reported_by, latitude, longitude, gps_accuracy,
-       location_point, address, ward_id, category, title, description,
-       photo_url, photo_path, geohash, sla_deadline, base_priority
-     ) VALUES (
-       $1, $2, $3, $4,
-       ST_SetSRID(ST_MakePoint($15, $16), 4326),
-       $5, $6, $7, $8, $9,
-       $10, $11, $12, $13, $14
-     )
-     RETURNING *`,
-    [
-      reportedBy,   // $1
-      lat,          // $2
-      lng,          // $3
-      gpsAccuracy ? parseFloat(gpsAccuracy) : null, // $4
-      address || null,      // $5
-      wardId || null,       // $6
-      category,             // $7
-      title || null,        // $8
-      description || null,  // $9
-      photoUrl || null,     // $10
-      photoPath || null,    // $11
-      geohash || null,      // $12
-      slaDeadline || null,  // $13
-      basePriority || 5,    // $14
-      lng,                  // $15 — lng for ST_MakePoint (x)
-      lat,                  // $16 — lat for ST_MakePoint (y)
-    ]
-  );
-  return rows[0];
-},
+    const { rows } = await pool.query(
+      `INSERT INTO issues (
+         reported_by, latitude, longitude, gps_accuracy,
+         location_point, address, ward_id, category, title, description,
+         photo_url, photo_path, geohash, sla_deadline, base_priority
+       ) VALUES (
+         $1, $2, $3, $4,
+         ST_SetSRID(ST_MakePoint($15, $16), 4326),
+         $5, $6, $7, $8, $9,
+         $10, $11, $12, $13, $14
+       )
+       RETURNING *`,
+      [
+        reportedBy, lat, lng,
+        gpsAccuracy ? parseFloat(gpsAccuracy) : null,
+        address || null, wardId || null, category,
+        title || null, description || null,
+        photoUrl || null, photoPath || null,
+        geohash || null, slaDeadline || null,
+        basePriority || 5, lng, lat,
+      ]
+    );
+    return rows[0];
+  },
 
   async findById(id) {
     const { rows } = await pool.query(
@@ -62,7 +53,7 @@ const IssueModel = {
     return rows[0] || null;
   },
 
-  async findAll({ wardId, category, status, page = 1, limit = 20 } = {}) {
+  async findAll({ wardId, category, status, page = 1, limit = 50 } = {}) {
     const conditions = ['i.is_duplicate = FALSE'];
     const params = [];
     let p = 1;
@@ -81,9 +72,19 @@ const IssueModel = {
          i.latitude, i.longitude, i.photo_url,
          i.priority_score, i.vote_count,
          i.sla_deadline, i.sla_breached,
-         i.created_at,
+         i.created_at, i.address,
+         i.reported_by, i.ward_id,
+         i.ai_status, i.ai_confidence,
+         i.geohash,
          u.name   AS reporter_name,
-         w.ward_name
+         w.ward_name,
+         w.ward_number,
+         (
+           SELECT COUNT(*) FROM issues d
+           WHERE d.geohash = i.geohash
+           AND d.id != i.id
+           AND d.is_duplicate = TRUE
+         ) AS duplicate_count
        FROM issues i
        LEFT JOIN users u ON u.id = i.reported_by
        LEFT JOIN wards w ON w.id = i.ward_id
@@ -116,11 +117,18 @@ const IssueModel = {
     try {
       await client.query('BEGIN');
 
+      const { rows: current } = await client.query(
+        `SELECT status FROM issues WHERE id = $1`,
+        [id]
+      );
+      const fromStatus = current[0]?.status || null;
+
       const { rows } = await client.query(
         `UPDATE issues
-         SET status = $1, updated_at = NOW(),
-             resolved_at = CASE WHEN $1 = 'resolved' THEN NOW() ELSE resolved_at END
-         WHERE id = $2
+         SET status     = $1::text,
+             updated_at = NOW(),
+             resolved_at = CASE WHEN $1::text = 'resolved' THEN NOW() ELSE resolved_at END
+         WHERE id = $2::uuid
          RETURNING *`,
         [status, id]
       );
@@ -128,8 +136,8 @@ const IssueModel = {
       await client.query(
         `INSERT INTO issue_status_history
            (issue_id, changed_by, from_status, to_status, note)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [id, changedBy, rows[0]?.status, status, note]
+         VALUES ($1::uuid, $2::uuid, $3::text, $4::text, $5::text)`,
+        [id, changedBy, fromStatus, status, note || `Status changed to ${status}`]
       );
 
       await client.query('COMMIT');
@@ -157,11 +165,23 @@ const IssueModel = {
   async findByReporter(userId, { page = 1, limit = 20 } = {}) {
     const offset = (page - 1) * limit;
     const { rows } = await pool.query(
-      `SELECT id, category, status, title, photo_url,
-              priority_score, vote_count, created_at, sla_breached
-       FROM issues
-       WHERE reported_by = $1
-       ORDER BY created_at DESC
+      `SELECT
+         i.id, i.category, i.status, i.title,
+         i.photo_url, i.priority_score, i.vote_count,
+         i.created_at, i.sla_breached, i.address,
+         i.reported_by, i.ai_status, i.ai_confidence,
+         i.geohash,
+         w.ward_name, w.ward_number,
+         (
+           SELECT COUNT(*) FROM issues d
+           WHERE d.geohash = i.geohash
+           AND d.id != i.id
+           AND d.is_duplicate = TRUE
+         ) AS duplicate_count
+       FROM issues i
+       LEFT JOIN wards w ON w.id = i.ward_id
+       WHERE i.reported_by = $1::uuid
+       ORDER BY i.created_at DESC
        LIMIT $2 OFFSET $3`,
       [userId, limit, offset]
     );

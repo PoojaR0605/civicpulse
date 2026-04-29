@@ -5,6 +5,12 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { validate, schemas }       = require('../middleware/validate');
 const upload                      = require('../middleware/upload');
 
+router.get('/analytics',
+  authenticate,
+  authorize('officer', 'admin'),
+  IssuesController.getAnalytics
+);
+
 router.get('/',     authenticate, IssuesController.getAll);
 router.get('/mine', authenticate, IssuesController.getMyIssues);
 router.get('/:id',  authenticate, IssuesController.getById);
